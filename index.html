@@ -487,9 +487,23 @@
   document.getElementById('ovlSkip').onclick=()=>{ ovl.style.display='none'; running=true; };
 
   /* Avvio */
-  reset("imola"); refreshLeader(); pickWX();
-  ovl.style.display='none';
-  setInterval(loop,16);
+  // Avvio robusto per iPad/Safari
+reset("imola"); 
+refreshLeader(); 
+pickWX();
+
+// niente overlay bloccante all'avvio
+ovl.style.display = 'none';
+
+// parte subito
+running = true;
+draw(); // disegna il primo frame
+
+// loop affidabile (meglio di setInterval su iPad)
+(function rafLoop(){
+  loop();
+  requestAnimationFrame(rafLoop);
+})();
 })();
 </script>
   window.onerror = (m,src,l,c,e)=>{
