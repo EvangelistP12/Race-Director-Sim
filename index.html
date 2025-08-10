@@ -488,9 +488,14 @@
 
   /* Avvio */
   reset("imola"); refreshLeader(); pickWX();
-  ovl.style.display='flex';
+  ovl.style.display='none';
   setInterval(loop,16);
 })();
 </script>
+  window.onerror = (m,src,l,c,e)=>{
+  const box=document.getElementById('err');
+  if(box) box.textContent = "Errore JS: "+m+"  @"+l+":"+c;
+};
 </body>
+  <pre id="err" style="color:#ff8080;padding:8px;white-space:pre-wrap"></pre>
 </html>
