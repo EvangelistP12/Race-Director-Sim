@@ -1,7 +1,367 @@
 <!DOCTYPE html>
 <html lang="it">
-<meta charset="utf-8">
-<title>Race Director Sim</title>
-<h1>Funziona! 👋</h1>
-<p>Se vedi questa pagina, GitHub Pages è attivo e l'index.html è nella root.</p>
-<p>Prossimo passo: sostituisci questo file con la versione 4.1.1 del gioco.</p>
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Race Director Sim – v4.1.1</title>
+<style>
+  :root{
+    --bg:#0b0f1a; --panel:#111827; --panel2:#141f33; --border:#2d3a54; --text:#eaeaea; --muted:#b7c3d9;
+    --accent:#5172b8;
+  }
+  html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{display:flex;gap:16px;flex-wrap:wrap;padding:12px}
+  #game{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px;max-width:100%}
+  .title{font-weight:800;font-size:18px;margin-bottom:8px;letter-spacing:.2px}
+  canvas{display:block;border-radius:12px;background:#071019;max-width:100%;height:auto}
+  .hud{display:flex;gap:10px;margin:6px 0;flex-wrap:wrap;align-items:center}
+  .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:#18243a;color:var(--text)}
+  .muted{color:var(--muted)}
+  select,button{background:#18243a;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 12px;cursor:pointer}
+  button:hover{filter:brightness(1.07)}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .group{border:1px solid var(--border);background:var(--panel2);border-radius:12px;padding:10px}
+  .group h3{margin:0 0 6px 0;font-size:15px}
+  .flagSwatch{width:16px;height:16px;border-radius:3px;display:inline-block;border:1px solid #0008;margin-right:6px;vertical-align:-3px}
+  .green{background:#00e676}.yellow{background:#ffeb3b}.red{background:#ff1744}.sc{background:linear-gradient(45deg,#ffd600 50%,#000 50%);border:1px solid #000}
+  #leader{width:360px;max-width:100%;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px}
+  #leader h3{margin:0 0 8px 0;font-size:15px}
+  #table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  #table th,#table td{padding:6px 8px;border-bottom:1px solid #22314d;font-size:13px}
+  #table tr.highlight{background:#1b2947}
+  .score{font-variant-numeric:tabular-nums}
+  .notice{border:1px dashed var(--accent);border-radius:10px;padding:10px;background:#0f1730;color:#c5d4ff;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="game">
+    <div class="title">Race Director Sim – v4.1.1</div>
+    <canvas id="cv" width="1180" height="720"></canvas>
+
+    <div class="hud">
+      <label class="pill">Circuito:
+        <select id="trackSel">
+          <option value="imola">Imola</option>
+          <option value="monza">Monza</option>
+        </select>
+      </label>
+      <label class="pill">Giri:
+        <select id="lapsSel">
+          <option>5</option><option selected>7</option><option>10</option><option>15</option>
+        </select>
+      </label>
+      <span class="pill">Meteo: <b id="wx">—</b></span>
+      <span class="pill">Giro: <b id="lap">1</b>/<b id="maxLap">7</b></span>
+      <span class="pill">BANDIERA: <b id="flagLbl">GREEN</b></span>
+      <span class="pill">Punteggio: <b id="score" class="score">0</b></span>
+      <span class="muted">Parte da solo. Spazio=Avvia/Pausa, R=Restart.</span>
+    </div>
+
+    <div class="controls">
+      <div class="group">
+        <h3>Controlli bandiere</h3>
+        <button id="fGreen"><span class="flagSwatch green"></span>Verde</button>
+        <button id="fYellow"><span class="flagSwatch yellow"></span>Gialla (FCY)</button>
+        <button id="fSC"><span class="flagSwatch sc"></span>Safety Car</button>
+        <button id="fRed"><span class="flagSwatch red"></span>Rossa</button>
+      </div>
+      <div class="group">
+        <h3>Penalità</h3>
+        <select id="carSel"></select>
+        <div class="controls">
+          <button data-pen="+5s">+5s</button>
+          <button data-pen="+10s">+10s</button>
+          <button data-pen="DT">Drive-Through</button>
+          <button data-pen="SG10">Stop&Go 10s</button>
+          <button data-pen="BLACK">Bandiera Nera (DSQ)</button>
+          <button id="undoPen">Annulla ultima</button>
+        </div>
+      </div>
+      <div class="group">
+        <h3>Gara</h3>
+        <button id="btnStart">▶️ Avvia/Pausa</button>
+        <button id="btnRestart">🔁 Restart</button>
+        <button id="btnReweather">🌤️ Meteo random</button>
+      </div>
+    </div>
+
+    <div id="incident" class="notice" style="display:none;"></div>
+  </div>
+
+  <aside id="leader">
+    <h3>Classifica in tempo reale</h3>
+    <table id="table">
+      <thead><tr><th>#</th><th>Team</th><th>Pilota</th><th>Giro</th><th>Gap</th><th>Pen</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </aside>
+</div>
+
+<script>
+(function(){
+  const cv=document.getElementById('cv'); const ctx=cv.getContext('2d',{alpha:false});
+  const W=cv.width,H=cv.height;
+  const lapEl=document.getElementById('lap'); const maxLapEl=document.getElementById('maxLap');
+  const wxEl=document.getElementById('wx'); const trackSel=document.getElementById('trackSel'); const lapsSel=document.getElementById('lapsSel');
+  const flagLbl=document.getElementById('flagLbl'); const scoreEl=document.getElementById('score');
+  const incBox=document.getElementById('incident');
+  const carSel=document.getElementById('carSel');
+  const tbody=document.getElementById('tbody');
+
+  // ===== Tracks =====
+  const IMOLA=[[-.25,-.95],[.55,-.92],[.8,-.7],[.88,-.35],[.75,-.05],[.4,0],[.1,.1],[-.1,.35],[-.25,.6],[-.4,.85],[-.7,.95],[-.9,.75],[-.88,.4],[-.7,.1],[-.4,-.05],[-.1,-.25],[.05,-.55],[0,-.8],[-.1,-.92],[-.25,-.95]];
+  const MONZA=[[.9,-.9],[.1,-.9],[-.5,-.8],[-.85,-.55],[-.9,-.2],[-.65,.05],[-.3,.05],[-.05,0],[.2,-.1],[.45,-.05],[.7,.1],[.85,.35],[.8,.6],[.55,.8],[.2,.9],[-.2,.9],[-.65,.85],[-.9,.7],[-.95,.45],[-.85,.15],[-.55,-.05],[-.1,-.15],[.5,-.2],[.9,-.3],[.95,-.6],[.9,-.9]];
+
+  function buildPath(poly,pad=90){
+    const xs=poly.map(p=>p[0]), ys=poly.map(p=>p[1]);
+    const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+    const w=maxX-minX,h=maxY-minY; const s=Math.min((W-2*pad)/w,(H-2*pad)/h);
+    const ox=pad-minX*s, oy=pad-minY*s;
+    const P=poly.map(([x,y])=>({x:x*s+ox,y:y*s+oy}));
+    let L=[0],len=0;
+    for(let i=1;i<P.length;i++){ const dx=P[i].x-P[i-1].x, dy=P[i].y-P[i-1].y; const seg=Math.hypot(dx,dy); len+=seg; L.push(len); }
+    return {P,L,len,scale:s};
+  }
+  function posOnPath(path,d){
+    const D=((d%path.len)+path.len)%path.len;
+    let i=1; while(i<path.L.length&&path.L[i]<D) i++;
+    const d0=path.L[i-1], d1=path.L[i]; const t=(D-d0)/(d1-d0+1e-6);
+    const a=path.P[i-1], b=path.P[i]; const x=a.x+(b.x-a.x)*t, y=a.y+(b.y-a.y)*t;
+    const ang=Math.atan2(b.y-a.y,b.x-a.x); const nx=-Math.sin(ang), ny=Math.cos(ang);
+    return {x,y,ang,nx,ny};
+  }
+
+  // ===== Weather =====
+  const WX=[
+    {n:"Sole", sky1:"#79c6ff", sky2:"#1c3b6b", asphalt:"#4a5f8f", fog:0},
+    {n:"Coperto", sky1:"#98a8bd", sky2:"#2d3a54", asphalt:"#455a86", fog:0.02},
+    {n:"Pioggia", sky1:"#8ea3b8", sky2:"#334257", asphalt:"#3f537c", fog:0.06}
+  ];
+  let wx=WX[0]; function pickWX(){ wx=WX[Math.floor(Math.random()*WX.length)]; wxEl.textContent=wx.n; }
+
+  // ===== Visuals =====
+  function drawSky(){
+    const g=ctx.createLinearGradient(0,0,0,H*0.55); g.addColorStop(0,wx.sky1); g.addColorStop(1,wx.sky2);
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    ctx.globalAlpha=0.12;
+    for(let i=0;i<8;i++){ const r=60+Math.random()*120,x=Math.random()*W,y=40+Math.random()*180;
+      const grad=ctx.createRadialGradient(x,y,r*0.2,x,y,r); grad.addColorStop(0,"#fff"); grad.addColorStop(1,"transparent");
+      ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(x,y,r,0,6.28); ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+  function drawEnvironment(){
+    ctx.fillStyle="#0f2b3a"; ctx.beginPath(); ctx.moveTo(0,H*0.55);
+    for(let x=0;x<=W;x+=40){ const y=H*0.55+Math.sin(x*.004)*14+Math.cos(x*.007)*10+12; ctx.lineTo(x,y); }
+    ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle="#0e3c2e"; ctx.fillRect(0,H*0.60,W,H*0.40);
+    for(let i=0;i<30;i++){ const x=Math.random()*W, y=H*0.58+(Math.random()*20-10), h=18+Math.random()*20;
+      ctx.fillStyle="#0a2d22"; ctx.fillRect(x-2,y,4,h);
+      ctx.fillStyle="#164a37"; ctx.beginPath(); ctx.arc(x,y,8+Math.random()*8,0,6.28); ctx.fill();
+    }
+    const base=H*0.59;
+    for(let i=0;i<4;i++){ const w=200+Math.random()*90, x=80+i*260;
+      ctx.fillStyle="#1a253a"; ctx.fillRect(x,base-40,w,40);
+      ctx.fillStyle=["#ff5252","#ffd600","#40c4ff","#00e676"][i%4]; ctx.fillRect(x+6,base-52,88,10);
+      for(let k=0;k<220;k++){
+        const px=x+Math.random()*w, py=base-40+Math.random()*38;
+        ctx.fillStyle=["#f06292","#ffd600","#80cbc4","#ef9a9a","#90caf9","#ffab40"][k%6];
+        ctx.fillRect(px,py,1.2,1.2);
+      }
+    }
+  }
+  function drawTrack(path){
+    ctx.strokeStyle="rgba(0,0,0,.35)"; ctx.lineWidth=44; ctx.lineCap="round"; ctx.lineJoin="round";
+    ctx.beginPath(); ctx.moveTo(path.P[0].x,path.P[0].y); for(let i=1;i<path.P.length;i++) ctx.lineTo(path.P[i].x,path.P[i].y); ctx.stroke();
+    ctx.strokeStyle=wx.asphalt; ctx.lineWidth=36; ctx.beginPath(); ctx.moveTo(path.P[0].x,path.P[0].y); for(let i=1;i<path.P.length;i++) ctx.lineTo(path.P[i].x,path.P[i].y); ctx.stroke();
+    ctx.lineWidth=4;
+    for(let i=1;i<path.P.length;i++){
+      const a=path.P[i-1], b=path.P[i]; const ang=Math.atan2(b.y-a.y,b.x-a.x);
+      const nx=-Math.sin(ang), ny=Math.cos(ang);
+      const segL=Math.hypot(b.x-a.x,b.y-a.y); const steps=Math.floor(segL/14);
+      for(let s=0;s<steps;s++){
+        const t1=s/steps, t2=(s+0.5)/steps;
+        const x1=a.x+(b.x-a.x)*t1+nx*22, y1=a.y+(b.y-a.y)*t1+ny*22;
+        const x2=a.x+(b.x-a.x)*t2+nx*22, y2=a.y+(b.y-a.y)*t2+ny*22;
+        ctx.strokeStyle=(s%2===0)?"#e53935":"#eceff1";
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      }
+    }
+    ctx.setLineDash([14,14]); ctx.strokeStyle="#c9d6ff"; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(path.P[0].x,path.P[0].y); for(let i=1;i<path.P.length;i++) ctx.lineTo(path.P[i].x,path.P[i].y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const palette=["#e10600","#00d2be","#0600ef","#ff9800","#00c853","#8e24aa","#ffd600","#40c4ff","#b388ff","#64ffda","#ff1744","#2b2d42"];
+  const teamNames=["Aquila GP","Vortex","Nebula","Artemis","Orion","Tempest","Falconet","Helios","Quartz","Zenith","Argon","Volta"];
+
+  function drawF1(x,y,ang,col){
+    ctx.save(); ctx.translate(x,y); ctx.rotate(ang);
+    ctx.globalAlpha=.35; ctx.fillStyle="#000"; ctx.beginPath(); ctx.ellipse(3,4,26,10,0,0,6.28); ctx.fill(); ctx.globalAlpha=1;
+    ctx.fillStyle="#e3e7f1"; ctx.fillRect(-28,-8,12,16); ctx.fillRect(18,-6,8,12);
+    const grd=ctx.createLinearGradient(-20,-8,26,8); grd.addColorStop(0,col); grd.addColorStop(1,"#111");
+    ctx.fillStyle=grd; ctx.fillRect(-20,-7,40,14);
+    ctx.fillStyle=col; ctx.beginPath(); ctx.moveTo(-2,-7); ctx.lineTo(26,-2); ctx.lineTo(26,2); ctx.lineTo(-2,7); ctx.closePath(); ctx.fill();
+    ctx.fillStyle="#0b0b0e"; const r=4.4;
+    ctx.beginPath(); ctx.arc(-12,-10,r,0,6.28); ctx.fill();
+    ctx.beginPath(); ctx.arc(-12,10,r,0,6.28); ctx.fill();
+    ctx.beginPath(); ctx.arc(12,-10,r,0,6.28); ctx.fill();
+    ctx.beginPath(); ctx.arc(12,10,r,0,6.28); ctx.fill();
+    ctx.restore();
+  }
+
+  // ===== State =====
+  let path=buildPath(IMOLA), cars=[], lap=1, running=true, maxLap=7, flag="GREEN", safety=false, score=0;
+  let penaltiesHistory=[];
+  function reset(which){
+    path=buildPath(which==="monza"?MONZA:IMOLA);
+    const shuffled=[...teamNames].sort(()=>Math.random()-0.5);
+    cars = new Array(12).fill(0).map((_,i)=>({ id:i, team:shuffled[i%shuffled.length], color:palette[i%palette.length],
+      driver:`#${i+11}`, d:i*60, v:110+Math.random()*24, lap:1, finished:false, total:0, pen:[], dsq:false }));
+    lap=1; score=0; flag="GREEN"; safety=false; penaltiesHistory=[];
+    buildCarSelector(); pickWX();
+  }
+  function buildCarSelector(){
+    carSel.innerHTML=""; cars.forEach(c=>{ const o=document.createElement('option'); o.value=c.id; o.textContent=`${c.driver} ${c.team}`; carSel.appendChild(o); });
+  }
+  function setFlag(nf){ if(flag===nf) return; flag=nf; safety=(nf==="SC"); flagLbl.textContent=nf; }
+  function fmt(ms){ const s=ms/1000, m=Math.floor(s/60), sec=(s-m*60).toFixed(3).padStart(6,'0'); return `${m}:${sec}`; }
+
+  function update(dtMs){
+    if(!running) return;
+    const dt=dtMs/1000;
+    let mult = (flag==="RED")?0 : (flag==="SC")?0.45 : (flag==="YELLOW")?0.65 : 1;
+    for(const c of cars){
+      if(c.finished||c.dsq) continue;
+      c.d += c.v*mult*dt;
+      if(c.d>path.len){ c.d-=path.len; c.lap++; }
+      if(c.lap>maxLap){ c.finished=true; }
+      c.total += dtMs;
+    }
+    lap = Math.max(...cars.map(c=>c.lap));
+    refreshLeader();
+    if(cars.every(c=>c.finished||c.dsq)){ running=false; incBox.style.display='block'; incBox.innerHTML="🏁 <b>FINE GARA</b><br>"+leaderboardHtml(true); }
+  }
+
+  function draw(){
+    drawSky(); drawEnvironment(); drawTrack(path);
+    for(const c of cars){
+      if(c.dsq) continue;
+      const p=posOnPath(path,c.d);
+      ctx.globalAlpha=.35; drawF1(p.x- Math.cos(p.ang)*8, p.y- Math.sin(p.ang)*8, p.ang, c.color); ctx.globalAlpha=1;
+      drawF1(p.x,p.y,p.ang,c.color);
+    }
+    lapEl.textContent=lap; scoreEl.textContent=Math.floor(score);
+  }
+
+  function tick(){
+    update(16); draw();
+  }
+
+  function penaltiesSeconds(list){ return list.reduce((s,p)=>s+p.secs,0); }
+
+  function refreshLeader(){
+    const arr=cars.slice().filter(c=>!c.dsq).map(c=>{
+      const penS=penaltiesSeconds(c.pen);
+      return {...c, time:c.total+penS*1000, penS};
+    }).sort((a,b)=> (b.finished-a.finished) || (a.lap-b.lap? b.lap-a.lap : (a.time-b.time)));
+    tbody.innerHTML="";
+    const leadTime = arr.length?arr[0].time:0, leadLap=arr.length?arr[0].lap:1;
+    arr.forEach((c,i)=>{
+      const tr=document.createElement('tr'); if(i===0) tr.className='highlight';
+      const gap = (c.lap<leadLap) ? `+${(leadLap-c.lap)} lap` : (i===0? "—" : `+${((c.time-leadTime)/1000).toFixed(3)}s`);
+      tr.innerHTML = `<td>${i+1}</td><td>${c.team}</td><td>${c.driver}</td><td>${c.lap}</td><td>${gap}</td><td>${c.penS?("+"+c.penS.toFixed(0)+"s"):"—"}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+  function leaderboardHtml(showTimes){
+    const arr=cars.slice().filter(c=>!c.dsq).map(c=>{
+      const penS=penaltiesSeconds(c.pen);
+      return {...c, time:c.total+penS*1000, penS};
+    }).sort((a,b)=> (b.finished-a.finished) || (a.lap-b.lap? b.lap-a.lap : (a.time-b.time)));
+    const leadTime = arr.length?arr[0].time:0, leadLap=arr.length?arr[0].lap:1;
+    return arr.map((c,i)=>{
+      const gap = (c.lap<leadLap) ? `+${(leadLap-c.lap)} lap` : (i===0? "—" : `+${((c.time-leadTime)/1000).toFixed(3)}s`);
+      return `${i+1}. ${c.driver} ${c.team} — Lap ${c.lap} ${showTimes?("("+fmt(c.total)+")"):""} ${c.penS?(" +"+c.penS.toFixed(0)+"s"): ""}`;
+    }).join("<br>");
+  }
+
+  // ===== Incidents / punteggio =====
+  let incident=null, incTimer=1500+Math.random()*1500;
+  function maybeIncident(dt){
+    incTimer -= dt;
+    if(incident||incTimer>0) return;
+    if(Math.random()<0.25){
+      const types=[
+        {type:"Spin", suggested:"YELLOW", msg:"Testacoda senza contatto"},
+        {type:"Debris", suggested:"YELLOW", msg:"Detriti in pista"},
+        {type:"Crash", suggested:"SC", msg:"Auto ferma in posizione pericolosa"},
+        {type:"BigCrash", suggested:"RED", msg:"Barriere danneggiate"}
+      ];
+      const pick=types[Math.floor(Math.random()*types.length)];
+      const active=cars.filter(c=>!c.finished&&!c.dsq);
+      const victim=active.length?active[Math.floor(Math.random()*active.length)]:null;
+      incident={...pick, carId:victim?victim.id:null, ttl:9000};
+      const carTxt=victim?` (${victim.driver} ${victim.team})`:"";
+      incBox.innerHTML=`⚠️ <b>INCIDENTE:</b> ${incident.type}${carTxt} — <i>${incident.msg}</i> <span class="muted">(Consiglio: ${incident.suggested})</span>`;
+      incBox.style.display='block';
+      incTimer=2500+Math.random()*3500;
+    }
+  }
+  function evaluateIncident(byAction){
+    if(!incident){ incBox.style.display='none'; return; }
+    const correct = flag===incident.suggested || (incident.suggested==="SC" && flag==="YELLOW" && safety);
+    score += (byAction? (correct?10:-6) : -4);
+    incident=null; incBox.style.display='none';
+  }
+
+  // ===== Controls =====
+  document.getElementById('fGreen').onclick=()=>{ setFlag("GREEN"); if(incident) evaluateIncident(true); };
+  document.getElementById('fYellow').onclick=()=>{ setFlag("YELLOW"); if(incident) evaluateIncident(true); };
+  document.getElementById('fSC').onclick=()=>{ setFlag("SC"); if(incident) evaluateIncident(true); };
+  document.getElementById('fRed').onclick=()=>{ setFlag("RED"); if(incident) evaluateIncident(true); };
+  document.getElementById('btnReweather').onclick=()=>{ pickWX(); draw(); };
+
+  document.querySelectorAll('button[data-pen]').forEach(b=>{
+    b.onclick=()=>{
+      const car=cars.find(c=>c.id==carSel.value); if(!car) return;
+      const t=b.getAttribute('data-pen');
+      if(t==="BLACK"){ car.dsq=true; penaltiesHistory.push({id:car.id,type:t,secs:0}); refreshLeader(); return; }
+      if(t==="DT"){ penaltiesHistory.push({id:car.id,type:t,secs:0}); return; }
+      if(t==="SG10"){ car.pen.push({type:t,secs:10}); penaltiesHistory.push({id:car.id,type:t,secs:10}); refreshLeader(); return; }
+      if(t==="+5s"||t==="+10s"){ const s=(t==="+5s")?5:10; car.pen.push({type:t,secs:s}); penaltiesHistory.push({id:car.id,type:t,secs:s}); refreshLeader(); }
+    };
+  });
+  document.getElementById('undoPen').onclick=()=>{
+    const last=penaltiesHistory.pop(); if(!last) return;
+    const car=cars.find(c=>c.id===last.id); if(!car) return;
+    if(last.type==="BLACK") car.dsq=false;
+    else{
+      const i=car.pen.findIndex(p=>p.type===last.type&&p.secs===last.secs);
+      if(i>=0) car.pen.splice(i,1);
+    }
+    refreshLeader();
+  };
+
+  function toggle(){ running=!running; document.getElementById('btnStart').textContent= running?"⏸️ Pausa":"▶️ Avvia"; }
+  function restart(){ reset(trackSel.value); running=true; document.getElementById('btnStart').textContent="⏸️ Pausa"; refreshLeader(); incBox.style.display='none'; }
+  document.getElementById('btnStart').onclick=toggle;
+  document.getElementById('btnRestart').onclick=restart;
+  document.addEventListener('keydown',(e)=>{ if(e.code==="Space"){ e.preventDefault(); toggle(); } if(e.key==="r"||e.key==="R"){ restart(); } });
+
+  lapsSel.onchange=()=>{ maxLap=parseInt(lapsSel.value,10); maxLapEl.textContent=maxLap; };
+  trackSel.onchange=()=>{ reset(trackSel.value); refreshLeader(); };
+
+  // ===== Loop: autostart + setInterval (compat) =====
+  let last=performance.now();
+  function loop(){
+    const now=performance.now(); const dt=now-last; last=now;
+    maybeIncident(dt); if(incident){ incident.ttl-=dt; if(incident.ttl<=0) evaluateIncident(false); }
+    tick();
+  }
+  reset("imola"); refreshLeader(); pickWX();
+  setInterval(loop,16); // parte da sola
+})();
+</script>
+</body>
+</html>
